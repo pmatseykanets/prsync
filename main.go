@@ -29,11 +29,6 @@ func main() {
 }
 
 func run(ctx context.Context) error {
-	token := os.Getenv("GITHUB_TOKEN")
-	if token == "" {
-		return fmt.Errorf("GITHUB_TOKEN is required")
-	}
-
 	var (
 		configPath          string
 		dryRun, showVersion bool
@@ -46,6 +41,11 @@ func run(ctx context.Context) error {
 	if showVersion {
 		fmt.Printf("prsync version %s\n", version.Version)
 		return nil
+	}
+
+	token := os.Getenv("GITHUB_TOKEN")
+	if token == "" {
+		return fmt.Errorf("GITHUB_TOKEN is required")
 	}
 
 	cfgRaw, err := os.ReadFile(configPath)
