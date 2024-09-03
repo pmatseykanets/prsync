@@ -27,7 +27,7 @@ checksum:
 
 changelog:
   sort: asc
-  use: github-native
+  use: github
   filters:
     exclude:
       - "^docs:"
