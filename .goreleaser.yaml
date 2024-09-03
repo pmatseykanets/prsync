@@ -22,9 +22,12 @@ archives:
     format_overrides:
       - goos: windows
         format: zip
+checksum:
+  name_template: "checksums.txt"
 
 changelog:
   sort: asc
+  use: github-native
   filters:
     exclude:
       - "^docs:"
