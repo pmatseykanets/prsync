@@ -12,6 +12,7 @@ import (
 
 	"github.com/machinebox/graphql"
 	"github.com/pmatseykanets/prsync/github"
+	"github.com/pmatseykanets/prsync/version"
 	"golang.org/x/oauth2"
 )
 
@@ -34,12 +35,18 @@ func run(ctx context.Context) error {
 	}
 
 	var (
-		configPath string
-		dryRun     bool
+		configPath          string
+		dryRun, showVersion bool
 	)
 	flag.StringVar(&configPath, "config", "config.yaml", "Path to the config file")
 	flag.BoolVar(&dryRun, "dry-run", false, "Dry run")
+	flag.BoolVar(&showVersion, "version", showVersion, "Print version and exit")
 	flag.Parse()
+
+	if showVersion {
+		fmt.Printf("prsync version %s\n", version.Version)
+		return nil
+	}
 
 	cfgRaw, err := os.ReadFile(configPath)
 	if err != nil {
