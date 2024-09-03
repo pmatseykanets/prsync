@@ -1,6 +1,10 @@
 package github
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/machinebox/graphql"
+)
 
 func NewPullRequestQuery(owner, name string, first int, after string) string {
 	return fmt.Sprintf(PullRequestQuery, owner, name, first, after)
@@ -149,8 +153,12 @@ query projectPullRequests{
   }
 }`
 
-func NewAddPullRequestToProjectMutation(projectId, pullRequestId string) string {
-	return fmt.Sprintf(addPullRequestToProjectMutation, projectId, pullRequestId)
+func NewAddPullRequestToProjectRequest(projectId, pullRequestId string) *graphql.Request {
+	req := graphql.NewRequest(addPullRequestToProjectMutation)
+	req.Var("projectId", projectId)
+	req.Var("pullRequestId", pullRequestId)
+
+	return req
 }
 
 var addPullRequestToProjectMutation = `

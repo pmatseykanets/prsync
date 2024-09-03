@@ -147,7 +147,7 @@ func run(ctx context.Context) error {
 		fmt.Printf("  - %s %s %s\n", pr.URL, pr.Author.Login, pr.Title)
 		if !cfg.dryRun {
 			if err := addPullRequestToProject(ctx, client, project.ID, pr.ID); err != nil {
-				fmt.Printf("Error adding PR %s to the project: %v\n", pr.URL, err)
+				return fmt.Errorf("error adding PR %s to the project: %w", pr.URL, err)
 			}
 		}
 	}
@@ -322,7 +322,7 @@ func getTeamMembers(ctx context.Context, client *graphql.Client, teamOrg, teamNa
 func addPullRequestToProject(ctx context.Context, client *graphql.Client, projectID, pullRequestID string) error {
 	var resp github.AddPullRequestToProjectResponse
 
-	req := graphql.NewRequest(github.NewAddPullRequestToProjectMutation(projectID, pullRequestID))
+	req := github.NewAddPullRequestToProjectRequest(projectID, pullRequestID)
 	if err := client.Run(ctx, req, &resp); err != nil {
 		return err
 	}
