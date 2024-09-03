@@ -162,16 +162,17 @@ func checkGitHubURL(ctx context.Context, url, token string) error {
 	))
 	httpClient.Timeout = httpTimeout
 
-	body, err := json.Marshal(struct {
+	var body bytes.Buffer
+	err := json.NewEncoder(&body).Encode(struct {
 		Query string `json:"query"`
 	}{
 		Query: github.NewViewerQuery(),
 	})
 	if err != nil {
-		return err
+		return fmt.Errorf("error encoding request body: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, url, &body)
 	if err != nil {
 		return fmt.Errorf("error creating request: %w", err)
 	}
@@ -214,7 +215,7 @@ func getRepositoryPullRequests(
 	for {
 		var resp github.PullRequestResponse
 
-		req := graphql.NewRequest(github.NewPullRequestQuery(owner, name, 100, after))
+		req := github.NewPullRequestsRequest(owner, name, 100, after)
 		if err := client.Run(ctx, req, &resp); err != nil {
 			return nil, err
 		}
@@ -264,7 +265,7 @@ func getProjectPullRequests(
 	for {
 		var resp github.ProjectItemsResponse
 
-		req := graphql.NewRequest(github.NewProjectItemsQuery(owner, number, 100, after))
+		req := github.NewProjectItemsRequest(owner, number, 100, after)
 		if err := client.Run(ctx, req, &resp); err != nil {
 			return nil, nil, err
 		}
@@ -305,7 +306,7 @@ func getProjectPullRequests(
 func getTeamMembers(ctx context.Context, client *graphql.Client, teamOrg, teamName string) ([]github.User, error) {
 	var resp github.TeamMembersResponse
 
-	req := graphql.NewRequest(github.NewTeamMembersQuery(teamOrg, teamName, 100, ""))
+	req := github.NewTeamMembersRequest(teamOrg, teamName, 100, "")
 	if err := client.Run(ctx, req, &resp); err != nil {
 		return nil, err
 	}
