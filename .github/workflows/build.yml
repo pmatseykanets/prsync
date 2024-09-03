@@ -22,12 +22,10 @@ jobs:
         go-version: ${{ matrix.go }}
     - name: Vet
       run: go vet ./...
-    - name: Run staticcheck
-      uses: dominikh/staticcheck-action@v1.2.0
+    - name: Lint
+      uses: golangci/golangci-lint-action@v6
       with:
-        version: "2024.1.1"
-        install-go: false
-        cache-key: ${{ matrix.go }}
+        version: v1.60
     - name: Test
       run: go test -vet=off -race ./...
     - name: Build
