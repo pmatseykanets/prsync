@@ -36,6 +36,7 @@ type configPullRequests struct {
 	includeDrafts bool
 	deleteMerged  bool
 	deleteClosed  bool
+	states        []github.PullRequestState
 }
 
 type config struct {
@@ -61,10 +62,11 @@ type configFile struct {
 		Exclude []string `yaml:"exclude"`
 	} `yaml:"authors"`
 	PullRequests struct {
-		AssignAuthor  bool `yaml:"assignAuthor"`
-		IncludeDrafts bool `yaml:"includeDrafts"`
-		DeleteMerged  bool `yaml:"deleteMerged"`
-		DeleteClosed  bool `yaml:"deleteClosed"`
+		AssignAuthor  bool     `yaml:"assignAuthor"`
+		IncludeDrafts bool     `yaml:"includeDrafts"`
+		DeleteMerged  bool     `yaml:"deleteMerged"`
+		DeleteClosed  bool     `yaml:"deleteClosed"`
+		States        []string `yaml:"states"`
 	} `yaml:"pullRequests"`
 }
 
@@ -107,7 +109,7 @@ func parseConfig(r io.Reader) (config, error) {
 	for _, repo := range cfgFile.Repos {
 		owner, name, ok := strings.Cut(repo, "/")
 		if !ok || owner == "" || name == "" {
-			return config{}, fmt.Errorf("invalid repo: %s", repo)
+			return config{}, fmt.Errorf("invalid repository: %s", repo)
 		}
 		cfg.repos = append(cfg.repos, configRepo{owner, name})
 	}
@@ -116,7 +118,7 @@ func parseConfig(r io.Reader) (config, error) {
 	}
 
 	if cfg.team.name == "" && len(cfgFile.Authors.Include) == 0 {
-		return config{}, fmt.Errorf("neither team or authors specified")
+		return config{}, fmt.Errorf("neither team nor authors specified")
 	}
 
 	cfg.authors.include = cfgFile.Authors.Include
@@ -127,6 +129,29 @@ func parseConfig(r io.Reader) (config, error) {
 
 	cfg.pullRequests.deleteMerged = cfgFile.PullRequests.DeleteMerged
 	cfg.pullRequests.deleteClosed = cfgFile.PullRequests.DeleteClosed
+
+	for _, state := range cfgFile.PullRequests.States {
+		ghState := github.PullRequestState(strings.ToUpper(state))
+		switch ghState {
+		case github.PullRequestStateOpen:
+		case github.PullRequestStateClosed:
+			if cfg.pullRequests.deleteClosed {
+				return config{}, fmt.Errorf("state CLOSED and deleteClosed=true are mutually exclusive")
+			}
+		case github.PullRequestStateMerged:
+			if cfg.pullRequests.deleteMerged {
+				return config{}, fmt.Errorf("state MERGED and deleteMerged=true are mutually exclusive")
+			}
+		default:
+			return config{}, fmt.Errorf("invalid pullRequest state: %s", state)
+		}
+
+		cfg.pullRequests.states = append(cfg.pullRequests.states, ghState)
+	}
+
+	if len(cfgFile.PullRequests.States) == 0 {
+		cfg.pullRequests.states = []github.PullRequestState{github.PullRequestStateOpen}
+	}
 
 	return cfg, nil
 }

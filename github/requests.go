@@ -6,13 +6,13 @@ import (
 	"github.com/machinebox/graphql"
 )
 
-func NewPullRequestsRequest(owner, name string, first int, after string) *graphql.Request {
-	pullRequestQuery := `
-  query pulls {
-      repository(owner: "%s", name: "%s") {
+func NewPullRequestsRequest(owner, name string, states []PullRequestState, first int, after string) *graphql.Request {
+	query := `
+  query pulls($owner: String!, $name: String!, $states: [PullRequestState!], $first: Int!, $after: String!) {
+      repository(owner: $owner, name: $name) {
           id
           nameWithOwner
-          pullRequests(states: OPEN, first: %d, after: "%s") {
+          pullRequests(states: $states, first: $first, after: $after) {
               totalCount
               nodes {
                   id
@@ -66,7 +66,14 @@ func NewPullRequestsRequest(owner, name string, first int, after string) *graphq
       }
   }`
 
-	return graphql.NewRequest(fmt.Sprintf(pullRequestQuery, owner, name, first, after))
+	req := graphql.NewRequest(query)
+	req.Var("owner", owner)
+	req.Var("name", name)
+	req.Var("states", states)
+	req.Var("first", first)
+	req.Var("after", after)
+
+	return req
 }
 
 func NewTeamMembersRequest(org, team string, first int, after string) *graphql.Request {

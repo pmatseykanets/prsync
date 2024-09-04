@@ -154,7 +154,7 @@ func run(ctx context.Context) error {
 		if addCount == 1 {
 			fmt.Println("Adding Pull Requests:")
 		}
-		fmt.Printf("  - %s %s %s\n", pr.URL, pr.Author.Login, pr.Title)
+		fmt.Printf("  - %s %s %s %s\n", pr.URL, pr.Author.Login, pr.Title, pr.State)
 
 		if !pr.IsAuthorAssigned() && cfg.pullRequests.assignAuthor {
 			userID := authors[pr.Author.Login] // Lookup author ID.
@@ -283,7 +283,7 @@ func getRepositoryPullRequests(
 	for {
 		var resp github.PullRequestResponse
 
-		req := github.NewPullRequestsRequest(owner, name, 100, after)
+		req := github.NewPullRequestsRequest(owner, name, cfg.pullRequests.states, 100, after)
 		if err := client.Run(ctx, req, &resp); err != nil {
 			return nil, err
 		}
