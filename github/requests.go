@@ -32,33 +32,26 @@ func NewPullRequestsRequest(owner, name string, first int, after string) *graphq
                       name
                   }
                   url
+                  state
                   assignees(first:100) {
                     totalCount
                     nodes {
                       login
                     }
                   }
-                  reviewRequests(first: 100) {
+                  projects: projectsV2(first: 100) {
                       totalCount
                       nodes {
                           id
-                          requestedReviewer {
-                              ... on User {
-                                id
-                                login
-                                name
+                          number
+                          title
+                          owner {
+                              ...on Organization {
+                                  login
                               }
-                          }
-                      }
-                  }
-                  reviews(states: [APPROVED, COMMENTED, CHANGES_REQUESTED], first: 100) {
-                      totalCount
-                      nodes {
-                          createdAt
-                          id
-                          state
-                          author {
-                            login
+                              ...on User {
+                                  login
+                              }
                           }
                       }
                   }
@@ -138,10 +131,11 @@ func NewProjectItemsRequest(owner string, number int, first int, after string) *
                   name
                 }
                 url
+                state
               }
             }
             issue: content{
-              ... on PullRequest {
+              ... on Issue {
                 id
               }
             }

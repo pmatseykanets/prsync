@@ -56,36 +56,43 @@ type Project struct {
 	ID     string `json:"id"`
 	Number int    `json:"number"`
 	Title  string `json:"title"`
-	Items  struct {
+	Owner  struct {
+		Login string `json:"login"`
+	} `json:"owner"`
+	Items struct {
 		TotalCount int           `json:"totalCount"`
 		Nodes      []ProjectItem `json:"nodes"`
 		PageInfo   PageInfo      `json:"pageInfo"`
 	} `json:"items"`
 }
 
+type PullRequestState string
+
+const (
+	PullRequestStateClosed PullRequestState = "CLOSED"
+	PullRequestStateMerged PullRequestState = "MERGED"
+	PullRequestStateOpen   PullRequestState = "OPEN"
+)
+
 type PullRequest struct {
-	ID         string     `json:"id"`
-	Number     int        `json:"number"`
-	Title      string     `json:"title"`
-	IsDraft    bool       `json:"isDraft"`
-	Author     User       `json:"author"`
-	Repository Repository `json:"repository"`
-	URL        string     `json:"url"`
+	ID         string           `json:"id"`
+	Number     int              `json:"number"`
+	Title      string           `json:"title"`
+	IsDraft    bool             `json:"isDraft"`
+	Author     User             `json:"author"`
+	Repository Repository       `json:"repository"`
+	URL        string           `json:"url"`
+	State      PullRequestState `json:"state"`
 	Assignees  struct {
 		TotalCount int      `json:"totalCount"`
 		Nodes      []User   `json:"nodes"`
 		PageInfo   PageInfo `json:"pageInfo"`
 	} `json:"assignees"`
-	ReviewRequests struct {
-		TotalCount int             `json:"totalCount"`
-		Nodes      []ReviewRequest `json:"nodes"`
-		PageInfo   PageInfo        `json:"pageInfo"`
-	} `json:"reviewRequests"`
-	Reviews struct {
-		TotalCount int      `json:"totalCount"`
-		Nodes      []Review `json:"nodes"`
-		PageInfo   PageInfo `json:"pageInfo"`
-	} `json:"reviews"`
+	Projects struct {
+		TotalCount int       `json:"totalCount"`
+		Nodes      []Project `json:"nodes"`
+		PageInfo   PageInfo  `json:"pageInfo"`
+	} `json:"projects"`
 }
 
 func (r *PullRequest) IsAuthorAssigned() bool {
