@@ -64,13 +64,18 @@ type Project struct {
 }
 
 type PullRequest struct {
-	ID             string     `json:"id"`
-	Number         int        `json:"number"`
-	Title          string     `json:"title"`
-	IsDraft        bool       `json:"isDraft"`
-	Author         User       `json:"author"`
-	Repository     Repository `json:"repository"`
-	URL            string     `json:"url"`
+	ID         string     `json:"id"`
+	Number     int        `json:"number"`
+	Title      string     `json:"title"`
+	IsDraft    bool       `json:"isDraft"`
+	Author     User       `json:"author"`
+	Repository Repository `json:"repository"`
+	URL        string     `json:"url"`
+	Assignees  struct {
+		TotalCount int      `json:"totalCount"`
+		Nodes      []User   `json:"nodes"`
+		PageInfo   PageInfo `json:"pageInfo"`
+	} `json:"assignees"`
 	ReviewRequests struct {
 		TotalCount int             `json:"totalCount"`
 		Nodes      []ReviewRequest `json:"nodes"`
@@ -81,6 +86,15 @@ type PullRequest struct {
 		Nodes      []Review `json:"nodes"`
 		PageInfo   PageInfo `json:"pageInfo"`
 	} `json:"reviews"`
+}
+
+func (r *PullRequest) IsAuthorAssigned() bool {
+	for _, a := range r.Assignees.Nodes {
+		if a.Login == r.Author.Login {
+			return true
+		}
+	}
+	return false
 }
 
 type RepositoryOwner struct {
@@ -154,6 +168,18 @@ type AddPullRequestToProjectResponse struct {
 	Errors Errors `json:"errors"`
 }
 
+type AddAssigneeToPullRequestResponse struct {
+	AddAssigneesToAssignable struct {
+		Assignable struct {
+			Assignees struct {
+				TotalCount int    `json:"totalCount"`
+				Nodes      []User `json:"nodes"`
+			} `json:"assignees"`
+		} `json:"item"`
+	} `json:"addAssigneesToAssignable"`
+	Errors Errors `json:"errors"`
+}
+
 type Viewer struct {
 	Login string `json:"login"`
 }
@@ -166,4 +192,9 @@ type ViewerResponse struct {
 type ErrorResponse struct {
 	Status  int    `json:"status"`
 	Message string `json:"message"`
+}
+
+type LookUpUserResponse struct {
+	User   *User  `json:"user"`
+	Errors Errors `json:"errors"`
 }

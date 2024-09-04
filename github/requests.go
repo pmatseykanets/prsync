@@ -22,7 +22,7 @@ func NewPullRequestsRequest(owner, name string, first int, after string) *graphq
                   createdAt
                   updatedAt
                   author {
-                      login
+                    login
                   }
                   repository {
                       id
@@ -32,14 +32,21 @@ func NewPullRequestsRequest(owner, name string, first int, after string) *graphq
                       name
                   }
                   url
+                  assignees(first:100) {
+                    totalCount
+                    nodes {
+                      login
+                    }
+                  }
                   reviewRequests(first: 100) {
                       totalCount
                       nodes {
                           id
                           requestedReviewer {
                               ... on User {
-                                  id
-                                  login
+                                id
+                                login
+                                name
                               }
                           }
                       }
@@ -51,7 +58,7 @@ func NewPullRequestsRequest(owner, name string, first int, after string) *graphq
                           id
                           state
                           author {
-                              login
+                            login
                           }
                       }
                   }
@@ -182,4 +189,42 @@ func NewViewerQuery() string {
           login
       }
   }`
+}
+
+func NewAddAssigneeToPullRequestRequest(pullRequestID, userID string) *graphql.Request {
+	mutation := `
+  mutation addAssigneeToPullRequest($pullRequestId: ID!, $userId: ID!) {
+    addAssigneesToAssignable(input: {assignableId: $pullRequestId, assigneeIds: [$userId]}) {
+      assignable {
+        assignees(first: 100) {
+            totalCount
+            nodes {
+                login
+            }
+        }
+      }
+    }
+  }`
+
+	req := graphql.NewRequest(mutation)
+	req.Var("pullRequestId", pullRequestID)
+	req.Var("userId", userID)
+
+	return req
+}
+
+func NewLookupUserRequest(login string) *graphql.Request {
+	query := `
+  query user($login: String!) {
+    user(login: $login) {
+      id
+      login
+      name
+    }
+  }`
+
+	req := graphql.NewRequest(query)
+	req.Var("login", login)
+
+	return req
 }

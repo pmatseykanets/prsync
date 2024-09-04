@@ -31,14 +31,20 @@ type configAuthors struct {
 	exclude []string
 }
 
+type configPullRequests struct {
+	assignAuthor  bool
+	includeDrafts bool
+}
+
 type config struct {
-	path      string
-	githubURL string
-	project   configProject
-	team      configTeam
-	repos     []configRepo
-	authors   configAuthors
-	dryRun    bool
+	path         string
+	githubURL    string
+	project      configProject
+	team         configTeam
+	repos        []configRepo
+	authors      configAuthors
+	pullRequests configPullRequests
+	dryRun       bool
 }
 
 type configFile struct {
@@ -52,6 +58,10 @@ type configFile struct {
 		Include []string `yaml:"include"`
 		Exclude []string `yaml:"exclude"`
 	} `yaml:"authors"`
+	PullRequests struct {
+		AssignAuthor  bool `yaml:"assignAuthor"`
+		IncludeDrafts bool `yaml:"includeDrafts"`
+	} `yaml:"pullRequests"`
 }
 
 func parseConfig(r io.Reader) (config, error) {
@@ -107,6 +117,9 @@ func parseConfig(r io.Reader) (config, error) {
 
 	cfg.authors.include = cfgFile.Authors.Include
 	cfg.authors.exclude = cfgFile.Authors.Exclude
+
+	cfg.pullRequests.assignAuthor = cfgFile.PullRequests.AssignAuthor
+	cfg.pullRequests.includeDrafts = cfgFile.PullRequests.IncludeDrafts
 
 	return cfg, nil
 }

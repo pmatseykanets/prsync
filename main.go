@@ -76,7 +76,7 @@ func run(ctx context.Context) error {
 
 	startedAt := time.Now()
 
-	authors := make(map[string]struct{})
+	authors := make(map[string]string)
 	{
 		if cfg.team.name != "" {
 			members, err := getTeamMembers(ctx, client, cfg.team.owner, cfg.team.name)
@@ -85,12 +85,22 @@ func run(ctx context.Context) error {
 			}
 
 			for _, member := range members {
-				authors[member.Login] = struct{}{}
+				authors[member.Login] = member.ID
 			}
 		}
+
 		for _, author := range cfg.authors.include {
-			authors[author] = struct{}{}
+			if _, ok := authors[author]; ok {
+				continue
+			}
+			// Lookup user IDs given the list of authors' logins.
+			user, err := lookupUser(ctx, client, author)
+			if err != nil {
+				return fmt.Errorf("error looking up user %s: %w", author, err)
+			}
+			authors[author] = user.ID
 		}
+
 		for _, author := range cfg.authors.exclude {
 			delete(authors, author)
 		}
@@ -124,7 +134,7 @@ func run(ctx context.Context) error {
 	fmt.Println("Repositories:")
 	var teamPRs []github.PullRequest
 	for _, repository := range cfg.repos {
-		prs, err := getRepositoryPullRequests(ctx, client, repository.owner, repository.name, authors)
+		prs, err := getRepositoryPullRequests(ctx, client, repository.owner, repository.name, authors, cfg.pullRequests.includeDrafts)
 		if err != nil {
 			return fmt.Errorf("error fetching repository pull requests: %w", err)
 		}
@@ -145,6 +155,16 @@ func run(ctx context.Context) error {
 			fmt.Println("New Pull Requests:")
 		}
 		fmt.Printf("  - %s %s %s\n", pr.URL, pr.Author.Login, pr.Title)
+
+		if !pr.IsAuthorAssigned() && cfg.pullRequests.assignAuthor {
+			userID := authors[pr.Author.Login] // Lookup author ID.
+			if userID != "" && !cfg.dryRun {
+				if err := addAssigneeToPullRequest(ctx, client, pr.ID, userID); err != nil {
+					return fmt.Errorf("error adding assignee %s to the PR %s: %w", pr.Author.Login, pr.URL, err)
+				}
+			}
+		}
+
 		if !cfg.dryRun {
 			if err := addPullRequestToProject(ctx, client, project.ID, pr.ID); err != nil {
 				return fmt.Errorf("error adding PR %s to the project: %w", pr.URL, err)
@@ -205,7 +225,8 @@ func getRepositoryPullRequests(
 	client *graphql.Client,
 	owner string,
 	name string,
-	authors map[string]struct{},
+	authors map[string]string,
+	includeDrafts bool,
 ) ([]github.PullRequest, error) {
 	var (
 		prs   []github.PullRequest
@@ -233,7 +254,7 @@ func getRepositoryPullRequests(
 				continue
 			}
 			// Skip draft PRs.
-			if pr.IsDraft {
+			if pr.IsDraft && !includeDrafts {
 				continue
 			}
 
@@ -332,4 +353,36 @@ func addPullRequestToProject(ctx context.Context, client *graphql.Client, projec
 	}
 
 	return nil
+}
+
+func addAssigneeToPullRequest(ctx context.Context, client *graphql.Client, pullRequestID, userID string) error {
+	var resp github.AddAssigneeToPullRequestResponse
+
+	req := github.NewAddAssigneeToPullRequestRequest(pullRequestID, userID)
+	if err := client.Run(ctx, req, &resp); err != nil {
+		return err
+	}
+	if resp.Errors != nil {
+		return resp.Errors
+	}
+
+	return nil
+}
+
+func lookupUser(ctx context.Context, client *graphql.Client, login string) (*github.User, error) {
+	var resp github.LookUpUserResponse
+
+	req := github.NewLookupUserRequest(login)
+	if err := client.Run(ctx, req, &resp); err != nil {
+		return nil, err
+	}
+	if resp.Errors != nil {
+		return nil, resp.Errors
+	}
+
+	if resp.User == nil {
+		return nil, fmt.Errorf("user not found")
+	}
+
+	return resp.User, nil
 }
