@@ -1,14 +1,12 @@
 package github
 
 import (
-	"fmt"
-
 	"github.com/machinebox/graphql"
 )
 
 func NewPullRequestsRequest(owner, name string, states []PullRequestState, first int, after string) *graphql.Request {
 	query := `
-  query pulls($owner: String!, $name: String!, $states: [PullRequestState!], $first: Int!, $after: String!) {
+  query repositoryPullRequests($owner: String!, $name: String!, $states: [PullRequestState!], $first: Int!, $after: String!) {
       repository(owner: $owner, name: $name) {
           id
           nameWithOwner
@@ -25,11 +23,11 @@ func NewPullRequestsRequest(owner, name string, states []PullRequestState, first
                     login
                   }
                   repository {
-                      id
-                      owner{
-                        login
-                      }
-                      name
+                    id
+                    owner{
+                      login
+                    }
+                    name
                   }
                   url
                   state
@@ -40,21 +38,21 @@ func NewPullRequestsRequest(owner, name string, states []PullRequestState, first
                     }
                   }
                   projects: projectsV2(first: 100) {
-                      totalCount
-                      nodes {
-                          id
-                          number
-                          title
-                          owner {
-                              ...on Organization {
-                                  login
-                              }
-                              ...on User {
-                                  login
-                              }
-                          }
+                    totalCount
+                    nodes {
+                      id
+                      number
+                      title
+                      owner {
+                        ...on Organization {
+                            login
+                        }
+                        ...on User {
+                            login
+                        }
                       }
-                  }
+                    }
+                }
               }
               pageInfo {
                   endCursor
@@ -77,18 +75,18 @@ func NewPullRequestsRequest(owner, name string, states []PullRequestState, first
 }
 
 func NewTeamMembersRequest(org, team string, first int, after string) *graphql.Request {
-	teamMembersQuery := `
-  query teams{
-    organization(login: "%s"){
-      team(slug: "%s"){
-        members (first: %d, after: "%s") {
+	query := `
+  query teamMembers($org: String!, $team: String!, $first: Int!, $after: String!) {
+    organization(login: $org) {
+      team(slug: $team) {
+        members (first: $first, after: $after) {
           totalCount
-          nodes{
+          nodes {
             id
             name
             login
           }
-          pageInfo{
+          pageInfo {
             endCursor
             hasNextPage
             hasPreviousPage
@@ -99,27 +97,33 @@ func NewTeamMembersRequest(org, team string, first int, after string) *graphql.R
     }
   }`
 
-	return graphql.NewRequest(fmt.Sprintf(teamMembersQuery, org, team, first, after))
+	req := graphql.NewRequest(query)
+	req.Var("org", org)
+	req.Var("team", team)
+	req.Var("first", first)
+	req.Var("after", after)
+
+	return req
 }
 
 func NewProjectItemsRequest(owner string, number int, first int, after string) *graphql.Request {
-	projectItemsQuery := `
-  query projectPullRequests{
-    organization(login: "%s"){
-      projectV2(number: %d){
+	query := `
+  query projectPullRequests ($owner: String!, $number: Int!, $first: Int!, $after: String!) {
+    organization(login: $owner) {
+      projectV2(number: $number) {
         id
         title
         number
-        items(first: %d, after: "%s") {
+        items(first: $first, after: $after) {
           totalCount
-          nodes{
+          nodes {
             id
             type
             databaseId
             createdAt
             updatedAt
             isArchived
-            pullRequest: content{
+            pullRequest: content {
               ... on PullRequest {
                 id
                 number
@@ -132,7 +136,7 @@ func NewProjectItemsRequest(owner string, number int, first int, after string) *
                 }
                 repository {
                   id
-                  owner{
+                  owner {
                     login
                   }
                   name
@@ -141,13 +145,13 @@ func NewProjectItemsRequest(owner string, number int, first int, after string) *
                 state
               }
             }
-            issue: content{
+            issue: content {
               ... on Issue {
                 id
               }
             }
           }
-          pageInfo{
+          pageInfo {
             endCursor
             hasNextPage
             hasPreviousPage
@@ -158,11 +162,17 @@ func NewProjectItemsRequest(owner string, number int, first int, after string) *
     }
   }`
 
-	return graphql.NewRequest(fmt.Sprintf(projectItemsQuery, owner, number, first, after))
+	req := graphql.NewRequest(query)
+	req.Var("owner", owner)
+	req.Var("number", number)
+	req.Var("first", first)
+	req.Var("after", after)
+
+	return req
 }
 
 func NewAddPullRequestToProjectRequest(projectId, pullRequestId string) *graphql.Request {
-	addPullRequestToProjectMutation := `
+	mutation := `
   mutation addPullRequestToProject($projectId: ID!, $pullRequestId: ID!) {
     addProjectV2ItemById(input: {projectId: $projectId, contentId: $pullRequestId}) {
       item{
@@ -176,7 +186,7 @@ func NewAddPullRequestToProjectRequest(projectId, pullRequestId string) *graphql
     }
   }`
 
-	req := graphql.NewRequest(addPullRequestToProjectMutation)
+	req := graphql.NewRequest(mutation)
 	req.Var("projectId", projectId)
 	req.Var("pullRequestId", pullRequestId)
 
@@ -201,9 +211,9 @@ func NewDeletePullRequestFromProjectRequest(projectId, pullRequestId string) *gr
 func NewViewerQuery() string {
 	return `
   query viewer{
-      viewer {
-          login
-      }
+    viewer {
+      login
+    }
   }`
 }
 
@@ -213,10 +223,10 @@ func NewAddAssigneeToPullRequestRequest(pullRequestID, userID string) *graphql.R
     addAssigneesToAssignable(input: {assignableId: $pullRequestId, assigneeIds: [$userId]}) {
       assignable {
         assignees(first: 100) {
-            totalCount
-            nodes {
-                login
-            }
+          totalCount
+          nodes {
+              login
+          }
         }
       }
     }
