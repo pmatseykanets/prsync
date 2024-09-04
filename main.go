@@ -134,7 +134,7 @@ func run(ctx context.Context) error {
 	fmt.Println("Repositories:")
 	var teamPRs []github.PullRequest
 	for _, repository := range cfg.repos {
-		prs, err := getRepositoryPullRequests(ctx, client, repository.owner, repository.name, authors, cfg.pullRequests.includeDrafts)
+		prs, err := getRepositoryPullRequests(ctx, client, repository.owner, repository.name, authors, cfg)
 		if err != nil {
 			return fmt.Errorf("error fetching repository pull requests: %w", err)
 		}
@@ -162,6 +162,12 @@ func run(ctx context.Context) error {
 				if err := addAssigneeToPullRequest(ctx, client, pr.ID, userID); err != nil {
 					return fmt.Errorf("error adding assignee %s to the PR %s: %w", pr.Author.Login, pr.URL, err)
 				}
+			}
+		}
+
+		for _, project := range pr.Projects.Nodes {
+			if project.Owner.Login == cfg.project.owner && project.Number == cfg.project.number {
+				continue // PR is already linked to the project.
 			}
 		}
 
@@ -226,7 +232,7 @@ func getRepositoryPullRequests(
 	owner string,
 	name string,
 	authors map[string]string,
-	includeDrafts bool,
+	cfg config,
 ) ([]github.PullRequest, error) {
 	var (
 		prs   []github.PullRequest
@@ -254,7 +260,7 @@ func getRepositoryPullRequests(
 				continue
 			}
 			// Skip draft PRs.
-			if pr.IsDraft && !includeDrafts {
+			if pr.IsDraft && !cfg.pullRequests.includeDrafts {
 				continue
 			}
 
