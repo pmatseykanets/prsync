@@ -143,16 +143,16 @@ func run(ctx context.Context) error {
 		fmt.Printf("  - %s/%s (%d)\n", repository.owner, repository.name, len(prs))
 	}
 
-	var newCount int
+	var addCount int
 	for _, pr := range teamPRs {
 		key := prKey{owner: pr.Repository.Owner.Login, repo: pr.Repository.Name, number: pr.Number}
 		if _, ok := projectPRs[key]; ok {
 			continue
 		}
 
-		newCount++
-		if newCount == 1 {
-			fmt.Println("New Pull Requests:")
+		addCount++
+		if addCount == 1 {
+			fmt.Println("Adding Pull Requests:")
 		}
 		fmt.Printf("  - %s %s %s\n", pr.URL, pr.Author.Login, pr.Title)
 
@@ -177,7 +177,48 @@ func run(ctx context.Context) error {
 			}
 		}
 	}
-	fmt.Printf("Added %d new pull requests in %f sec\n", newCount, time.Since(startedAt).Seconds())
+	if addCount > 0 {
+		fmt.Printf("Added %d pull requests\n", addCount)
+	} else {
+		fmt.Println("No pull requests to add")
+	}
+
+	if !cfg.pullRequests.deleteClosed && !cfg.pullRequests.deleteMerged {
+		return nil // Nothing else to do.
+	}
+
+	var deleteCount int
+	for _, pr := range projectPRs {
+		if _, ok := authors[pr.Author.Login]; !ok {
+			continue // Not a team's PR.
+		}
+
+		delete := (pr.State == github.PullRequestStateClosed && cfg.pullRequests.deleteClosed) ||
+			(pr.State == github.PullRequestStateMerged && cfg.pullRequests.deleteMerged)
+
+		if !delete {
+			continue
+		}
+
+		deleteCount++
+		if deleteCount == 1 {
+			fmt.Println("Deleting Pull Requests:")
+		}
+		fmt.Printf("  - %s %s %s %s\n", pr.URL, pr.Author.Login, pr.Title, pr.State)
+
+		if !cfg.dryRun {
+			if err := deletePullRequestFromProject(ctx, client, project.ID, pr.ProjectItemID); err != nil {
+				return fmt.Errorf("error deleting PR %s from the project: %w", pr.URL, err)
+			}
+		}
+	}
+	if deleteCount > 0 {
+		fmt.Printf("Deleted %d pull requests\n", deleteCount)
+	} else {
+		fmt.Println("No pull requests to delete")
+	}
+
+	fmt.Printf("Took %f sec\n", time.Since(startedAt).Seconds())
 
 	return nil
 }
@@ -317,7 +358,10 @@ func getProjectPullRequests(
 				continue
 			}
 
-			prs = append(prs, *item.PullRequest)
+			pr := *item.PullRequest
+			pr.ProjectItemID = item.ID
+
+			prs = append(prs, pr)
 		}
 
 		if !resp.Organization.Project.Items.PageInfo.HasNextPage {
@@ -351,6 +395,20 @@ func addPullRequestToProject(ctx context.Context, client *graphql.Client, projec
 	var resp github.AddPullRequestToProjectResponse
 
 	req := github.NewAddPullRequestToProjectRequest(projectID, pullRequestID)
+	if err := client.Run(ctx, req, &resp); err != nil {
+		return err
+	}
+	if resp.Errors != nil {
+		return resp.Errors
+	}
+
+	return nil
+}
+
+func deletePullRequestFromProject(ctx context.Context, client *graphql.Client, projectID, itemID string) error {
+	var resp github.DeletePullRequestFromProjectResponse
+
+	req := github.NewDeletePullRequestFromProjectRequest(projectID, itemID)
 	if err := client.Run(ctx, req, &resp); err != nil {
 		return err
 	}

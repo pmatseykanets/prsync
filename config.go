@@ -34,6 +34,8 @@ type configAuthors struct {
 type configPullRequests struct {
 	assignAuthor  bool
 	includeDrafts bool
+	deleteMerged  bool
+	deleteClosed  bool
 }
 
 type config struct {
@@ -61,6 +63,8 @@ type configFile struct {
 	PullRequests struct {
 		AssignAuthor  bool `yaml:"assignAuthor"`
 		IncludeDrafts bool `yaml:"includeDrafts"`
+		DeleteMerged  bool `yaml:"deleteMerged"`
+		DeleteClosed  bool `yaml:"deleteClosed"`
 	} `yaml:"pullRequests"`
 }
 
@@ -120,6 +124,9 @@ func parseConfig(r io.Reader) (config, error) {
 
 	cfg.pullRequests.assignAuthor = cfgFile.PullRequests.AssignAuthor
 	cfg.pullRequests.includeDrafts = cfgFile.PullRequests.IncludeDrafts
+
+	cfg.pullRequests.deleteMerged = cfgFile.PullRequests.DeleteMerged
+	cfg.pullRequests.deleteClosed = cfgFile.PullRequests.DeleteClosed
 
 	return cfg, nil
 }

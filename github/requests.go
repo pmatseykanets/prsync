@@ -156,7 +156,7 @@ func NewProjectItemsRequest(owner string, number int, first int, after string) *
 
 func NewAddPullRequestToProjectRequest(projectId, pullRequestId string) *graphql.Request {
 	addPullRequestToProjectMutation := `
-  mutation addPullRequestToTheProject($projectId: ID!, $pullRequestId: ID!) {
+  mutation addPullRequestToProject($projectId: ID!, $pullRequestId: ID!) {
     addProjectV2ItemById(input: {projectId: $projectId, contentId: $pullRequestId}) {
       item{
         id
@@ -170,6 +170,21 @@ func NewAddPullRequestToProjectRequest(projectId, pullRequestId string) *graphql
   }`
 
 	req := graphql.NewRequest(addPullRequestToProjectMutation)
+	req.Var("projectId", projectId)
+	req.Var("pullRequestId", pullRequestId)
+
+	return req
+}
+
+func NewDeletePullRequestFromProjectRequest(projectId, pullRequestId string) *graphql.Request {
+	mutation := `
+  mutation deletePullRequestFromProject($projectId: ID!, $pullRequestId: ID!) {
+    deleteProjectV2Item(input: {projectId: $projectId, itemId: $pullRequestId}) {
+      deletedItemId
+    }
+  }`
+
+	req := graphql.NewRequest(mutation)
 	req.Var("projectId", projectId)
 	req.Var("pullRequestId", pullRequestId)
 

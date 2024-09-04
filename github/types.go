@@ -93,6 +93,7 @@ type PullRequest struct {
 		Nodes      []Project `json:"nodes"`
 		PageInfo   PageInfo  `json:"pageInfo"`
 	} `json:"projects"`
+	ProjectItemID string `json:"projectItemId"`
 }
 
 func (r *PullRequest) IsAuthorAssigned() bool {
@@ -172,6 +173,13 @@ type AddPullRequestToProjectResponse struct {
 	AddProjectV2ItemByID struct {
 		Item *ProjectItem `json:"item"`
 	} `json:"addProjectV2ItemById"`
+	Errors Errors `json:"errors"`
+}
+
+type DeletePullRequestFromProjectResponse struct {
+	DeleteProjectV2Item struct {
+		DeletedItemId string `json:"deletedItemId"`
+	} `json:"deleteProjectV2Item"`
 	Errors Errors `json:"errors"`
 }
 
