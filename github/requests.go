@@ -20,6 +20,7 @@ func NewPullRequestsRequest(owner, name string, states []PullRequestState, first
                   createdAt
                   updatedAt
                   author {
+                    type: __typename
                     login
                   }
                   repository {
@@ -106,6 +107,24 @@ func NewTeamMembersRequest(org, team string, first int, after string) *graphql.R
 	return req
 }
 
+func NewProjectRequest(owner string, number int) *graphql.Request {
+	query := `
+  query projectPullRequests ($owner: String!, $number: Int!) {
+    organization(login: $owner) {
+      projectV2(number: $number) {
+        id
+        title
+        number
+      }
+    }
+  }`
+
+	req := graphql.NewRequest(query)
+	req.Var("owner", owner)
+	req.Var("number", number)
+
+	return req
+}
 func NewProjectItemsRequest(owner string, number int, first int, after string) *graphql.Request {
 	query := `
   query projectPullRequests ($owner: String!, $number: Int!, $first: Int!, $after: String!) {
@@ -246,6 +265,26 @@ func NewLookupUserRequest(login string) *graphql.Request {
       id
       login
       name
+    }
+  }`
+
+	req := graphql.NewRequest(query)
+	req.Var("login", login)
+
+	return req
+}
+
+func NewLookupUserMembershipRequest(login string) *graphql.Request {
+	query := `
+  query user($login: String!) {
+    user(login: $login) {
+      organizations(first: 100, after: "") {
+        totalCount
+        nodes {
+          login
+          name
+        }
+      }
     }
   }`
 
