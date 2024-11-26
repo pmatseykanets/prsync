@@ -6,11 +6,15 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
+	"iter"
+	"maps"
 	"net/http"
 	"os"
+	"slices"
+	"strings"
 	"time"
 
-	"github.com/machinebox/graphql"
 	"github.com/pmatseykanets/prsync/github"
 	"github.com/pmatseykanets/prsync/version"
 	"golang.org/x/oauth2"
@@ -28,13 +32,33 @@ func main() {
 	}
 }
 
+type githubClient interface {
+	AddAssigneeToPullRequest(ctx context.Context, prID, userID string) error
+	AddPullRequestToProject(ctx context.Context, projectID, prID string) error
+	DeletePullRequestFromProject(ctx context.Context, projectID, projectItemID string) error
+	GetProject(ctx context.Context, owner string, number int) (*github.Project, error)
+	GetProjectPullRequests(ctx context.Context, owner string, number int) iter.Seq2[*github.PullRequest, error]
+	GetRepositoryPullRequests(ctx context.Context, owner string, name string, states []github.PullRequestState) iter.Seq2[*github.PullRequest, error]
+	GetTeamMembers(ctx context.Context, owner, name string) ([]github.User, error)
+	GetUserOrganizations(ctx context.Context, login string) ([]github.Organization, error)
+	LookupUser(ctx context.Context, login string) (*github.User, error)
+	IsOrganizationMember(ctx context.Context, login, org string) (bool, error)
+}
+
+type authorResolver interface {
+	Resolve(ctx context.Context, login string) (bool, error)
+	GetID(ctx context.Context, login string) (string, error)
+}
+
 func run(ctx context.Context) error {
 	var (
 		configPath          string
 		dryRun, showVersion bool
+		verbose             bool
 	)
 	flag.StringVar(&configPath, "config", "config.yaml", "Path to the config file")
 	flag.BoolVar(&dryRun, "dry-run", false, "Dry run")
+	flag.BoolVar(&verbose, "verbose", false, "Verbose output")
 	flag.BoolVar(&showVersion, "version", showVersion, "Print version and exit")
 	flag.Parse()
 
@@ -60,162 +84,48 @@ func run(ctx context.Context) error {
 
 	cfg.path = configPath
 	cfg.dryRun = dryRun
+	cfg.verbose = verbose
 
 	fmt.Printf("Config file: %s\n", cfg.path)
-	fmt.Printf("Dry run: %t\n", cfg.dryRun)
-
-	if err := checkGitHubURL(ctx, cfg.githubURL, token); err != nil {
-		return fmt.Errorf("error checking API endpoint: %w", err)
-	}
+	fmt.Printf("  Dry run: %t\n", cfg.dryRun)
 
 	httpClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(
 		&oauth2.Token{AccessToken: token},
 	))
 	httpClient.Timeout = httpTimeout
-	client := graphql.NewClient(cfg.githubURL, graphql.WithHTTPClient(httpClient))
+
+	if err := checkGitHubURL(ctx, cfg.githubURL, httpClient); err != nil {
+		return fmt.Errorf("error checking API endpoint: %w", err)
+	}
+
+	client := github.NewClient(httpClient, cfg.githubURL)
 
 	startedAt := time.Now()
 
-	authors := make(map[string]string)
-	{
-		if cfg.team.name != "" {
-			members, err := getTeamMembers(ctx, client, cfg.team.owner, cfg.team.name)
-			if err != nil {
-				return fmt.Errorf("error fetching team members: %w", err)
-			}
-
-			for _, member := range members {
-				authors[member.Login] = member.ID
-			}
-		}
-
-		for _, author := range cfg.authors.include {
-			if _, ok := authors[author]; ok {
-				continue
-			}
-			// Lookup user IDs given the list of authors' logins.
-			user, err := lookupUser(ctx, client, author)
-			if err != nil {
-				return fmt.Errorf("error looking up user %s: %w", author, err)
-			}
-			authors[author] = user.ID
-		}
-
-		for _, author := range cfg.authors.exclude {
-			delete(authors, author)
-		}
+	authors, err := NewAuthors(ctx, client, cfg)
+	if err != nil {
+		return err
 	}
 
-	var project *github.Project
-
-	type prKey struct {
-		owner  string
-		repo   string
-		number int
-	}
-	projectPRs := make(map[prKey]github.PullRequest)
-	{
-		prj, prs, err := getProjectPullRequests(ctx, client, cfg.project.owner, cfg.project.number)
-		if err != nil {
-			return fmt.Errorf("error fetching project pull requests: %w", err)
-		}
-		project = prj
-
-		fmt.Printf("Project: %d %s\n", project.Number, project.Title)
-
-		for _, pr := range prs {
-			key := prKey{owner: pr.Repository.Owner.Login, repo: pr.Repository.Name, number: pr.Number}
-			projectPRs[key] = pr
-		}
+	project, err := client.GetProject(ctx, cfg.project.owner, cfg.project.number)
+	if err != nil {
+		return err
 	}
 
-	fmt.Printf("Authors: %d\n", len(authors))
-
-	fmt.Println("Repositories:")
-	var teamPRs []github.PullRequest
-	for _, repository := range cfg.repos {
-		prs, err := getRepositoryPullRequests(ctx, client, repository.owner, repository.name, authors, cfg)
-		if err != nil {
-			return fmt.Errorf("error fetching repository pull requests: %w", err)
-		}
-
-		teamPRs = append(teamPRs, prs...)
-		fmt.Printf("  - %s/%s (%d)\n", repository.owner, repository.name, len(prs))
+	projectPRs, err := getProjectPullRequests(ctx, client, cfg)
+	if err != nil {
+		return fmt.Errorf("error fetching project pull requests: %w", err)
 	}
 
-	var addCount int
-	for _, pr := range teamPRs {
-		key := prKey{owner: pr.Repository.Owner.Login, repo: pr.Repository.Name, number: pr.Number}
-		if _, ok := projectPRs[key]; ok {
-			continue
-		}
+	fmt.Printf("Project: %d %s (%d pull requests)\n", project.Number, project.Title, len(projectPRs))
 
-		addCount++
-		if addCount == 1 {
-			fmt.Println("Adding Pull Requests:")
-		}
-		fmt.Printf("  - %s %s %s %s\n", pr.URL, pr.Author.Login, pr.Title, pr.State)
-
-		if !pr.IsAuthorAssigned() && cfg.pullRequests.assignAuthor {
-			userID := authors[pr.Author.Login] // Lookup author ID.
-			if userID != "" && !cfg.dryRun {
-				if err := addAssigneeToPullRequest(ctx, client, pr.ID, userID); err != nil {
-					return fmt.Errorf("error adding assignee %s to the PR %s: %w", pr.Author.Login, pr.URL, err)
-				}
-			}
-		}
-
-		for _, project := range pr.Projects.Nodes {
-			if project.Owner.Login == cfg.project.owner && project.Number == cfg.project.number {
-				continue // PR is already linked to the project.
-			}
-		}
-
-		if !cfg.dryRun {
-			if err := addPullRequestToProject(ctx, client, project.ID, pr.ID); err != nil {
-				return fmt.Errorf("error adding PR %s to the project: %w", pr.URL, err)
-			}
-		}
+	err = addNewPullRequests(ctx, client, cfg, authors, project, projectPRs)
+	if err != nil {
+		return err
 	}
-	if addCount > 0 {
-		fmt.Printf("Added %d pull requests\n", addCount)
-	} else {
-		fmt.Println("No pull requests to add")
-	}
-
-	if !cfg.pullRequests.deleteClosed && !cfg.pullRequests.deleteMerged {
-		return nil // Nothing else to do.
-	}
-
-	var deleteCount int
-	for _, pr := range projectPRs {
-		if _, ok := authors[pr.Author.Login]; !ok {
-			continue // Not a team's PR.
-		}
-
-		delete := (pr.State == github.PullRequestStateClosed && cfg.pullRequests.deleteClosed) ||
-			(pr.State == github.PullRequestStateMerged && cfg.pullRequests.deleteMerged)
-
-		if !delete {
-			continue
-		}
-
-		deleteCount++
-		if deleteCount == 1 {
-			fmt.Println("Deleting Pull Requests:")
-		}
-		fmt.Printf("  - %s %s %s %s\n", pr.URL, pr.Author.Login, pr.Title, pr.State)
-
-		if !cfg.dryRun {
-			if err := deletePullRequestFromProject(ctx, client, project.ID, pr.ProjectItemID); err != nil {
-				return fmt.Errorf("error deleting PR %s from the project: %w", pr.URL, err)
-			}
-		}
-	}
-	if deleteCount > 0 {
-		fmt.Printf("Deleted %d pull requests\n", deleteCount)
-	} else {
-		fmt.Println("No pull requests to delete")
+	err = deleteCompletedPullRequests(ctx, client, cfg, authors, project, projectPRs)
+	if err != nil {
+		return err
 	}
 
 	fmt.Printf("Took %f sec\n", time.Since(startedAt).Seconds())
@@ -223,12 +133,204 @@ func run(ctx context.Context) error {
 	return nil
 }
 
-func checkGitHubURL(ctx context.Context, url, token string) error {
-	httpClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(
-		&oauth2.Token{AccessToken: token},
-	))
-	httpClient.Timeout = httpTimeout
+// addNewPullRequests adds new pull requests to the project
+// based on the author, state, and draft status of the pull request.
+func addNewPullRequests(
+	ctx context.Context,
+	client githubClient,
+	cfg config,
+	authors authorResolver,
+	project *github.Project,
+	projectPRs map[prKey]*github.PullRequest,
+) error {
+	var addCount int
+	fmt.Println("Checking for pull requests to add:")
+	for _, repository := range cfg.repos {
+		fmt.Printf("  - %s/%s\n", repository.owner, repository.name)
+		for pr, err := range getAuthorsPullRequests(ctx, client, cfg, authors, repository.owner, repository.name) {
+			if err != nil {
+				return fmt.Errorf("error fetching authors' pull requests: %w", err)
+			}
 
+			key := prKey{owner: pr.Repository.Owner.Login, repo: pr.Repository.Name, number: pr.Number}
+			if _, ok := projectPRs[key]; ok {
+				if cfg.verbose {
+					fmt.Printf("    - %s %s %s %s %s EXISTS\n", pr.URL, pr.Author.Login, pr.Title, pr.State, draftState(pr.IsDraft))
+				}
+				continue
+			}
+
+			if cfg.verbose {
+				fmt.Printf("    - %s %s %s %s %s NEW \n", pr.URL, pr.Author.Login, pr.Title, pr.State, draftState(pr.IsDraft))
+			} else {
+				fmt.Printf("    - %s %s %s %s %s\n", pr.URL, pr.Author.Login, pr.Title, pr.State, draftState(pr.IsDraft))
+
+			}
+
+			if !pr.IsAuthorAssigned() && cfg.pullRequests.add.assignAuthor {
+				userID, err := authors.GetID(ctx, pr.Author.Login)
+				if err != nil {
+					return fmt.Errorf("error looking up user %s: %w", pr.Author.Login, err)
+				}
+
+				if cfg.verbose {
+					fmt.Println("        Assigning author")
+				}
+
+				if userID != "" && !cfg.dryRun {
+					if err := client.AddAssigneeToPullRequest(ctx, pr.ID, userID); err != nil {
+						return fmt.Errorf("error adding assignee %s to the PR %s: %w", pr.Author.Login, pr.URL, err)
+					}
+				}
+			}
+
+			// Sanity check.
+			for _, prj := range pr.Projects.Nodes {
+				if prj.Owner.Login == cfg.project.owner && prj.Number == cfg.project.number {
+					continue // PR is already linked to the project.
+				}
+			}
+
+			if cfg.verbose {
+				fmt.Println("        Adding to project")
+			}
+			if !cfg.dryRun {
+				if err := client.AddPullRequestToProject(ctx, project.ID, pr.ID); err != nil {
+					return fmt.Errorf("error adding PR %s to the project: %w", pr.URL, err)
+				}
+			}
+		}
+	}
+
+	if addCount > 0 {
+		fmt.Printf("Added %d pull requests\n", addCount)
+	} else {
+		fmt.Println("No pull requests to add")
+	}
+
+	return nil
+}
+
+// deleteCompletedPullRequests deletes pull requests from the project
+// that match the state or draft status.
+// It takes authors into consideration if cfg.pullRequests.delete.allAuthors is false.
+func deleteCompletedPullRequests(
+	ctx context.Context,
+	client githubClient,
+	cfg config,
+	authors authorResolver,
+	project *github.Project,
+	projectPRs map[prKey]*github.PullRequest,
+) error {
+	if len(cfg.pullRequests.delete.states) == 0 && !cfg.pullRequests.delete.drafts {
+		return nil // Nothing else to do.
+	}
+
+	fmt.Println("Checking for pull requests to delete:")
+
+	var deleteCount int
+	for _, pr := range projectPRs {
+		if !cfg.pullRequests.delete.allAuthors {
+			ourAuthor, err := authors.Resolve(ctx, pr.Author.Login)
+			if err != nil {
+				return fmt.Errorf("error checking if %s is our author: %w", pr.Author.Login, err)
+			}
+
+			if cfg.verbose {
+				fmt.Printf("  - %s %s %s %s %s SKIP\n", pr.URL, pr.Author.Login, pr.Title, pr.State, draftState(pr.IsDraft))
+			}
+
+			if !ourAuthor {
+				continue
+			}
+		}
+
+		delete := pr.IsDraft && cfg.pullRequests.delete.drafts
+		if !delete {
+			for _, state := range cfg.pullRequests.delete.states {
+				if pr.State == state {
+					delete = true
+					break
+				}
+			}
+		}
+
+		if cfg.verbose {
+			fmt.Printf("  - %s %s %s %s %s", pr.URL, pr.Author.Login, pr.Title, pr.State, draftState(pr.IsDraft))
+		}
+
+		if !delete {
+			if cfg.verbose {
+				fmt.Println(" KEEP")
+			}
+			continue
+		}
+
+		deleteCount++
+
+		if cfg.verbose {
+			fmt.Println(" DELETE")
+		} else {
+			fmt.Printf("  - %s %s %s %s %s\n", pr.URL, pr.Author.Login, pr.Title, pr.State, draftState(pr.IsDraft))
+		}
+
+		if !cfg.dryRun {
+			if err := client.DeletePullRequestFromProject(ctx, project.ID, pr.ProjectItemID); err != nil {
+				return fmt.Errorf("error deleting PR %s from the project: %w", pr.URL, err)
+			}
+		}
+	}
+
+	if deleteCount > 0 {
+		fmt.Printf("Deleted %d pull requests\n", deleteCount)
+	} else {
+		fmt.Println("No pull requests to delete")
+	}
+
+	return nil
+}
+
+// draftState returns the string representation of the draft state of the pull request.
+func draftState(draft bool) string {
+	if draft {
+		return "DRAFT"
+	}
+	return "PR"
+}
+
+// checkGitHubURL checks if the provided URL is a valid GitHub API endpoint
+// by exercising the GraphQL and REST endpoints.
+func checkGitHubURL(ctx context.Context, url string, httpClient *http.Client) error {
+	doRequest := func(method, url string, body io.Reader) error {
+		req, err := http.NewRequestWithContext(ctx, method, url, body)
+		if err != nil {
+			return fmt.Errorf("error creating request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("error making request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == http.StatusOK {
+			return nil
+		}
+
+		message := http.StatusText(resp.StatusCode)
+
+		githubError := &github.Error{}
+		err = json.NewDecoder(resp.Body).Decode(githubError)
+		if err == nil && githubError.Message != "" {
+			message = githubError.Message
+		}
+
+		return fmt.Errorf("%d %s", resp.StatusCode, message)
+	}
+
+	// Check GraphQL endpoint.
 	var body bytes.Buffer
 	err := json.NewEncoder(&body).Encode(struct {
 		Query string `json:"query"`
@@ -239,214 +341,114 @@ func checkGitHubURL(ctx context.Context, url, token string) error {
 		return fmt.Errorf("error encoding request body: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, url, &body)
-	if err != nil {
-		return fmt.Errorf("error creating request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("error making request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusOK {
-		return nil
+	if err := doRequest(http.MethodPost, url+"/graphql", &body); err != nil {
+		return fmt.Errorf("error checking GraphQL endpoint: %w", err)
 	}
 
-	message := http.StatusText(resp.StatusCode)
-
-	githubError := &github.Error{}
-	err = json.NewDecoder(resp.Body).Decode(githubError)
-	if err == nil && githubError.Message != "" {
-		message = githubError.Message
+	// Check REST endpoint.
+	if err := doRequest(http.MethodGet, url+"/user", nil); err != nil {
+		return fmt.Errorf("error checking REST endpoint: %w", err)
 	}
 
-	return fmt.Errorf("%d %s", resp.StatusCode, message)
+	return nil
 }
 
-func getRepositoryPullRequests(
-	ctx context.Context,
-	client *graphql.Client,
-	owner string,
-	name string,
-	authors map[string]string,
-	cfg config,
-) ([]github.PullRequest, error) {
-	var (
-		prs   []github.PullRequest
-		after string
-	)
-
-	for {
-		var resp github.PullRequestResponse
-
-		req := github.NewPullRequestsRequest(owner, name, cfg.pullRequests.states, 100, after)
-		if err := client.Run(ctx, req, &resp); err != nil {
-			return nil, err
-		}
-		if resp.Errors != nil {
-			return nil, resp.Errors
-		}
-
-		if resp.Repository == nil {
-			return nil, fmt.Errorf("repository not found")
-		}
-
-		for _, pr := range resp.Repository.PullRequests.Nodes {
-			// Filter PRs by the author.
-			if _, ok := authors[pr.Author.Login]; !ok {
-				continue
-			}
-			// Skip draft PRs.
-			if pr.IsDraft && !cfg.pullRequests.includeDrafts {
-				continue
-			}
-
-			prs = append(prs, pr)
-		}
-
-		if !resp.Repository.PullRequests.PageInfo.HasNextPage {
-			break
-		}
-
-		after = resp.Repository.PullRequests.PageInfo.EndCursor
-	}
-
-	return prs, nil
+type prKey struct {
+	owner  string
+	repo   string
+	number int
 }
 
+// getProjectPullRequests returns the project information and all of its pull requests.
 func getProjectPullRequests(
 	ctx context.Context,
-	client *graphql.Client,
-	owner string,
-	number int,
-) (*github.Project, []github.PullRequest, error) {
-	var (
-		prs     []github.PullRequest
-		after   string
-		project *github.Project
-	)
+	client githubClient,
+	cfg config,
+) (map[prKey]*github.PullRequest, error) {
+	projectPRs := make(map[prKey]*github.PullRequest)
 
-	for {
-		var resp github.ProjectItemsResponse
+	if cfg.verbose {
+		fmt.Println("Fetching project info and pull requests")
+	}
 
-		req := github.NewProjectItemsRequest(owner, number, 100, after)
-		if err := client.Run(ctx, req, &resp); err != nil {
-			return nil, nil, err
-		}
-		if resp.Errors != nil {
-			return nil, nil, resp.Errors
+	for pr, err := range client.GetProjectPullRequests(ctx, cfg.project.owner, cfg.project.number) {
+		if err != nil {
+			return nil, fmt.Errorf("error fetching project pull requests: %w", err)
 		}
 
-		if resp.Organization == nil || resp.Organization.Project == nil {
-			return nil, nil, fmt.Errorf("project not found")
-		}
+		key := prKey{owner: pr.Repository.Owner.Login, repo: pr.Repository.Name, number: pr.Number}
+		projectPRs[key] = pr
+	}
 
-		if project == nil {
-			project = &github.Project{
-				ID:     resp.Organization.Project.ID,
-				Number: resp.Organization.Project.Number,
-				Title:  resp.Organization.Project.Title,
+	if cfg.verbose {
+		keys := slices.Collect(maps.Keys(projectPRs))
+		slices.SortFunc(keys, func(i, j prKey) int {
+			if i.owner != j.owner {
+				return strings.Compare(i.owner, j.owner)
 			}
-		}
+			if i.repo != j.repo {
+				return strings.Compare(i.repo, j.repo)
+			}
+			return i.number - j.number
+		})
 
-		for _, item := range resp.Organization.Project.Items.Nodes {
-			if item.Type != github.ProjectItemTypePullRequest {
+		var repo string
+		for _, key := range keys {
+			currentRepo := key.owner + "/" + key.repo
+			if repo != currentRepo {
+				repo = currentRepo
+				fmt.Printf("  - %s\n", repo)
+			}
+
+			pr := projectPRs[key]
+			fmt.Printf("    - %s %s %s %s %s\n", pr.URL, pr.Author.Login, pr.Title, pr.State, draftState(pr.IsDraft))
+		}
+	}
+
+	return projectPRs, nil
+}
+
+// getAuthorsPullRequests returns an iterator that yields pull requests
+// for a repository filtered according to the draft status and authors.
+// Filtering by the state is done by client.GetRepositoryPullRequests.
+func getAuthorsPullRequests(
+	ctx context.Context,
+	client githubClient,
+	cfg config,
+	authors authorResolver,
+	owner string,
+	repo string,
+) iter.Seq2[*github.PullRequest, error] {
+	return func(yield func(*github.PullRequest, error) bool) {
+		for pr, err := range client.GetRepositoryPullRequests(ctx, owner, repo, cfg.pullRequests.add.states) {
+			if err != nil {
+				yield(nil, fmt.Errorf("error fetching repository pull requests: %w", err))
+				return
+			}
+
+			// Skip draft PRs.
+			if pr.IsDraft && !cfg.pullRequests.add.drafts {
 				continue
 			}
 
-			pr := *item.PullRequest
-			pr.ProjectItemID = item.ID
+			// Skip PRs from non-users (e.g. bots).
+			if pr.Author.Type != github.AuthorTypeUser {
+				continue
+			}
 
-			prs = append(prs, pr)
+			includedAuthor, err := authors.Resolve(ctx, pr.Author.Login)
+			if err != nil {
+				yield(nil, fmt.Errorf("error evaluating author filter for %s: %w", pr.Author.Login, err))
+				return
+			}
+
+			if !includedAuthor {
+				continue
+			}
+
+			if !yield(pr, nil) {
+				return
+			}
 		}
-
-		if !resp.Organization.Project.Items.PageInfo.HasNextPage {
-			break
-		}
-
-		after = resp.Organization.Project.Items.PageInfo.EndCursor
 	}
-
-	return project, prs, nil
-}
-
-func getTeamMembers(ctx context.Context, client *graphql.Client, teamOrg, teamName string) ([]github.User, error) {
-	var resp github.TeamMembersResponse
-
-	req := github.NewTeamMembersRequest(teamOrg, teamName, 100, "")
-	if err := client.Run(ctx, req, &resp); err != nil {
-		return nil, err
-	}
-	if resp.Errors != nil {
-		return nil, resp.Errors
-	}
-	if resp.Organization == nil || resp.Organization.Team == nil {
-		return nil, fmt.Errorf("team not found")
-	}
-
-	return resp.Organization.Team.Members.Nodes, nil
-}
-
-func addPullRequestToProject(ctx context.Context, client *graphql.Client, projectID, pullRequestID string) error {
-	var resp github.AddPullRequestToProjectResponse
-
-	req := github.NewAddPullRequestToProjectRequest(projectID, pullRequestID)
-	if err := client.Run(ctx, req, &resp); err != nil {
-		return err
-	}
-	if resp.Errors != nil {
-		return resp.Errors
-	}
-
-	return nil
-}
-
-func deletePullRequestFromProject(ctx context.Context, client *graphql.Client, projectID, itemID string) error {
-	var resp github.DeletePullRequestFromProjectResponse
-
-	req := github.NewDeletePullRequestFromProjectRequest(projectID, itemID)
-	if err := client.Run(ctx, req, &resp); err != nil {
-		return err
-	}
-	if resp.Errors != nil {
-		return resp.Errors
-	}
-
-	return nil
-}
-
-func addAssigneeToPullRequest(ctx context.Context, client *graphql.Client, pullRequestID, userID string) error {
-	var resp github.AddAssigneeToPullRequestResponse
-
-	req := github.NewAddAssigneeToPullRequestRequest(pullRequestID, userID)
-	if err := client.Run(ctx, req, &resp); err != nil {
-		return err
-	}
-	if resp.Errors != nil {
-		return resp.Errors
-	}
-
-	return nil
-}
-
-func lookupUser(ctx context.Context, client *graphql.Client, login string) (*github.User, error) {
-	var resp github.LookUpUserResponse
-
-	req := github.NewLookupUserRequest(login)
-	if err := client.Run(ctx, req, &resp); err != nil {
-		return nil, err
-	}
-	if resp.Errors != nil {
-		return nil, resp.Errors
-	}
-
-	if resp.User == nil {
-		return nil, fmt.Errorf("user not found")
-	}
-
-	return resp.User, nil
 }

@@ -11,6 +11,8 @@ Usage of prsync:
         Path to the config file (default "config.yaml")
   -dry-run
         Dry run
+  -verbose
+        Verbose output
   -version
         Print version and exit
 ```
@@ -28,8 +30,8 @@ The tool expects `GITHUB_TOKEN` environment variable to be set with a token that
 
 ```yaml
 github:
-  # GitHub graphql API endpoint. Optional. Default is https://api.github.com/graphql.
-  url: https://api.github.com/graphql
+  # GitHub API endpoint. Optional. Default is https://api.github.com.
+  url: https://api.github.com
 
 # A project to sync pull requests to. Required.
 project: <owner>/<number>
@@ -38,29 +40,48 @@ project: <owner>/<number>
 repos:
 #   - <owner>/<name>
 
-# A team to get a list of pull request authors from. Optional.
-team: <org>/<name>
-
 # A list of specific authors to include or exclude. Optional.
 authors:
   include:
+    users:
+      # - <login>
+    teams:
+      # - <owner>/<name>
+    orgs:
+      # - <organization>
+  exclude:
+    users:
+      # - <login>
+    teams:
+      # - <owner>/<name>
+    orgs:
+      # - <organization>
+  
+
+include:
     # - <login>
   exclude:
     # - <login>
 
 pullRequests:
-  # Add the author of the pull request to assignees. Default is false.
-  assignAuthor: true
-  # Add draft pull requests. Default is false.
-  includeDrafts: false
-  # Delete merged pull requests from the project. Default is false.
-  deleteMerged: true
-  # Delete closed pull requests from the project. Default is false.
-  deleteClosed: true
-  # A list of pull request states to add to the project. Default is [OPEN].
-  # MERGED and CLOSED are mutually exclusive with deleteMerged: true and deleteClosed: true.
-  states:
-    - OPEN
-    # - MERGED
-    # - CLOSED
+  add:
+    # Add pull requests only in the following states. Default is [OPEN].
+    # Mutually exclusive with delete.states.
+    states:
+      - OPEN
+    # Add draft pull requests. Default is false.
+    drafts: true
+    # Add the author of the pull request to assignees. Default is false.
+    assignAuthor: true
+  delete:
+    # Delete pull requests only in the following states. Default is none.
+    # Mutually exclusive with add.states.
+    states:
+      - CLOSED
+      - MERGED
+    # Delete draft pull requests from the project. Default is false.
+    drafts: false
+    # Delete pull requests from the project from all authors 
+    # or only matching rules in the authors section. Default is false.
+    forAllAuthors: false
 ```

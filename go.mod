@@ -1,6 +1,6 @@
 module github.com/pmatseykanets/prsync
 
-go 1.22
+go 1.23
 
 require (
 	github.com/machinebox/graphql v0.2.2

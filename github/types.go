@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	APIEndpoint                = "https://api.github.com/graphql"
+	APIEndpoint                = "https://api.github.com"
 	ProjectItemTypeIssue       = "ISSUE"
 	ProjectItemTypePullRequest = "PULL_REQUEST"
 )
@@ -23,6 +23,18 @@ type User struct {
 	Email string `json:"email"`
 	Login string `json:"login"`
 	Name  string `json:"name"`
+}
+
+type AuthorType string
+
+const (
+	AuthorTypeBot  AuthorType = "Bot"
+	AuthorTypeUser AuthorType = "User"
+)
+
+type Author struct {
+	Login string     `json:"login"`
+	Type  AuthorType `json:"type"`
 }
 
 type ReviewRequest struct {
@@ -68,6 +80,14 @@ type Project struct {
 
 type PullRequestState string
 
+func (s PullRequestState) IsValid() bool {
+	switch s {
+	case PullRequestStateClosed, PullRequestStateMerged, PullRequestStateOpen:
+		return true
+	}
+	return false
+}
+
 const (
 	PullRequestStateClosed PullRequestState = "CLOSED"
 	PullRequestStateMerged PullRequestState = "MERGED"
@@ -79,7 +99,7 @@ type PullRequest struct {
 	Number     int              `json:"number"`
 	Title      string           `json:"title"`
 	IsDraft    bool             `json:"isDraft"`
-	Author     User             `json:"author"`
+	Author     Author           `json:"author"`
 	Repository Repository       `json:"repository"`
 	URL        string           `json:"url"`
 	State      PullRequestState `json:"state"`
@@ -155,11 +175,19 @@ type Team struct {
 }
 
 type Organization struct {
+	ID      string   `json:"id"`
+	Login   string   `json:"login"`
+	Name    string   `json:"name"`
 	Team    *Team    `json:"team"`
 	Project *Project `json:"projectV2"`
 }
 
 type TeamMembersResponse struct {
+	Organization *Organization `json:"organization"`
+	Errors       Errors        `json:"errors"`
+}
+
+type ProjectResponse struct {
 	Organization *Organization `json:"organization"`
 	Errors       Errors        `json:"errors"`
 }
@@ -209,7 +237,17 @@ type ErrorResponse struct {
 	Message string `json:"message"`
 }
 
-type LookUpUserResponse struct {
+type LookupUserResponse struct {
 	User   *User  `json:"user"`
+	Errors Errors `json:"errors"`
+}
+
+type LookupUserMembershipResponse struct {
+	User struct {
+		Organizations struct {
+			TotalCount int            `json:"totalCount"`
+			Nodes      []Organization `json:"nodes"`
+		} `json:"organizations"`
+	} `json:"user"`
 	Errors Errors `json:"errors"`
 }
