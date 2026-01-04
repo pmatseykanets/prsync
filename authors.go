@@ -5,6 +5,7 @@ import (
 	"fmt"
 )
 
+// authors manages author filtering and caching for PR inclusion/exclusion rules.
 type authors struct {
 	client         githubClient
 	cfg            config
@@ -19,6 +20,7 @@ type authors struct {
 	orgs           map[string]map[string]bool
 }
 
+// NewAuthors creates and initializes an author resolver, fetching team members upfront.
 func NewAuthors(ctx context.Context, client githubClient, cfg config) (*authors, error) {
 	a := &authors{
 		client:         client,
@@ -43,8 +45,15 @@ func NewAuthors(ctx context.Context, client githubClient, cfg config) (*authors,
 	}
 
 	for _, team := range append(cfg.authors.include.teams, cfg.authors.exclude.teams...) {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		// Don't fetch the same team multiple times.
 		if _, ok := a.teams[team]; ok {
-			break
+			continue
 		}
 
 		if cfg.verbose {
@@ -70,6 +79,7 @@ func NewAuthors(ctx context.Context, client githubClient, cfg config) (*authors,
 	return a, nil
 }
 
+// Resolve determines if a user should be included based on configured rules.
 func (a *authors) Resolve(ctx context.Context, login string) (bool, error) {
 	// By default, all authors are included.
 	if a.cfg.authors.include.empty() && a.cfg.authors.exclude.empty() {
@@ -208,6 +218,7 @@ func (a *authors) Resolve(ctx context.Context, login string) (bool, error) {
 	return a.cfg.authors.include.empty(), nil
 }
 
+// GetID returns the GitHub user ID for a login, fetching and caching if needed.
 func (a *authors) GetID(ctx context.Context, login string) (string, error) {
 	id, ok := a.ids[login]
 	if !ok {
