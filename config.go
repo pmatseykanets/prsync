@@ -11,11 +11,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// configProject represents a GitHub project by owner and number.
 type configProject struct {
 	owner  string
 	number int
 }
 
+// configTeam represents a GitHub team by owner and name.
 type configTeam struct {
 	owner string
 	name  string
@@ -25,26 +27,31 @@ func (t configTeam) String() string {
 	return fmt.Sprintf("%s/%s", t.owner, t.name)
 }
 
+// configRepo represents a GitHub repository by owner and name.
 type configRepo struct {
 	owner string
 	name  string
 }
 
+// configAuthorRules defines include/exclude rules for users, teams, and orgs.
 type configAuthorRules struct {
 	users []string
 	teams []configTeam
 	orgs  []string
 }
 
+// configAuthors contains both include and exclude author rules.
 type configAuthors struct {
 	include configAuthorRules
 	exclude configAuthorRules
 }
 
+// empty returns true if no rules are defined.
 func (r *configAuthorRules) empty() bool {
 	return len(r.users) == 0 && len(r.teams) == 0 && len(r.orgs) == 0
 }
 
+// config holds the parsed and validated configuration.
 type config struct {
 	path         string
 	githubURL    string
@@ -67,6 +74,7 @@ type config struct {
 	verbose bool
 }
 
+// configFile matches the YAML structure for unmarshaling.
 type configFile struct {
 	GitHub struct {
 		URL string `yaml:"url"`
@@ -86,12 +94,11 @@ type configFile struct {
 		} `yaml:"exclude"`
 	} `yaml:"authors"`
 	PullRequests struct {
-		AssignAuthor        bool     `yaml:"assignAuthor"`
-		IncludeDrafts       bool     `yaml:"includeDrafts"`
-		DeleteMerged        bool     `yaml:"deleteMerged"`
-		DeleteClosed        bool     `yaml:"deleteClosed"`
-		DeleteForAllAuthors bool     `yaml:"deleteForAllAuthors"`
-		States              []string `yaml:"states"`
+		AssignAuthor        bool `yaml:"assignAuthor"`
+		IncludeDrafts       bool `yaml:"includeDrafts"`
+		DeleteMerged        bool `yaml:"deleteMerged"`
+		DeleteClosed        bool `yaml:"deleteClosed"`
+		DeleteForAllAuthors bool `yaml:"deleteForAllAuthors"`
 		Add                 struct {
 			States       []string `yaml:"states"`
 			AssignAuthor bool     `yaml:"assignAuthor"`
@@ -105,6 +112,7 @@ type configFile struct {
 	} `yaml:"pullRequests"`
 }
 
+// parseConfig reads and validates the YAML configuration.
 func parseConfig(r io.Reader) (config, error) {
 	var (
 		cfgFile configFile
@@ -213,7 +221,7 @@ func parseConfig(r io.Reader) (config, error) {
 		cfg.pullRequests.delete.states = append(cfg.pullRequests.delete.states, prState)
 	}
 
-	if len(cfgFile.PullRequests.States) == 0 {
+	if len(cfgFile.PullRequests.Add.States) == 0 {
 		// By default, add pull requests in OPEN state.
 		cfg.pullRequests.add.states = []github.PullRequestState{github.PullRequestStateOpen}
 	}
